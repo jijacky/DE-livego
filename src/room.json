@@ -1,0 +1,25 @@
+{
+	"lives": [{
+
+		"liveId": "01",
+		"urls": [{
+			"pushId": 1,
+			"userType": 0,
+			"videoType": 0,
+			"rtmpBase": "rtmp://10.10.50.159",
+			"savePath": "/root/data1",
+			"saveUrl": "http://10.10.50.159",
+			"videoName": "Camera",
+			"requestUrl": "http://39.98.124.180:7070/platform-admin/req/cameraControl"
+		}, {
+			"pushId": 2,
+			"userType": 0,
+			"videoType": 0,
+			"rtmpBase": "rtmp://10.10.50.159",
+			"savePath": "/root/data2",
+			"saveUrl": "http://10.10.50.159",
+			"videoName": "Camera",
+			"requestUrl": "http://39.98.124.180:7070/platform-admin/req/cameraControl"
+		}]
+	}]
+}
