@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	version    = "v2.0.12"
+	version    = "v2.1.1"
 	baseConfig = flag.String(
 		"cfgfile",     //参数
 		"livego.json", //参数默认值
@@ -158,15 +158,13 @@ func startHTTPOpera(stream *rtmp.RtmpStream, l net.Listener) net.Listener {
 	}
 
 	rtmpAddr := fmt.Sprintf(":%d", configure.GetListenPort())
-	opServer := httpopera.NewServer(stream, rtmpAddr)
+	_ = httpopera.NewServer(stream, rtmpAddr, operaAddr)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
 				log.Error("HTTP-Operation server panic: ", r)
 			}
 		}()
-		log.Info("HTTP-Operation listen On", operaAddr)
-		opServer.Serve(opListen)
 	}()
 
 	return opListen
@@ -257,6 +255,7 @@ func main() {
 		} else {
 
 			log.Info("---->>>> Start Oper")
+
 			startHTTPOpera(stream, nil)
 		}
 	}

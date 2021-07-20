@@ -9,8 +9,9 @@ import (
 	"fmt"
 	_ "io/ioutil"
 	log "logging"
-	"net"
 	"net/http"
+	"os"
+	"path"
 	"protocol/rtmp"
 	"protocol/rtmp/rtmprelay"
 	"strconv"
@@ -18,19 +19,15 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
+	"github.com/rifflock/lfshook"
+	"github.com/sirupsen/logrus"
 )
 
-type Response struct {
-	w       http.ResponseWriter
-	Status  int    `json:"status"`
-	Message string `json:"message"`
-}
-
-func (r *Response) SendJson() (int, error) {
-	resp, _ := json.Marshal(r)
-	r.w.Header().Set("Content-Type", "application/json")
-	return r.w.Write(resp)
-}
+var (
+	logFilePath = "./"
+	logFileName = "livego.log"
+)
 
 type Operation struct {
 	Method string `json:"method"`
@@ -51,11 +48,6 @@ type ClientInfo struct {
 	rtmpLocalClient  *rtmp.Client
 }
 
-type ResponseResult struct {
-	Result  int    `json:"result"`
-	Message string `json:"message"`
-}
-
 type Server struct {
 	handler       av.Handler
 	session       map[string]*rtmprelay.RtmpRelay
@@ -68,14 +60,24 @@ type Server struct {
 	webGin       *gin.Engine
 }
 
-func NewServer(h av.Handler, rtmpAddr string) *Server {
-	return &Server{
+func NewServer(h av.Handler, rtmpAddr string, operaListen string) *Server {
+
+	server := &Server{
 		handler:       h,
 		session:       make(map[string]*rtmprelay.RtmpRelay),
 		sessionFlv:    make(map[string]*rtmprelay.FlvPull),
 		sessionMRelay: cmap.New(),
 		rtmpAddr:      rtmpAddr,
 	}
+	server.webGin = gin.Default()
+	gin.SetMode(gin.ReleaseMode)
+	server.webGin.Use(logerMiddleware())
+	server.webGin.Use(Cors())
+
+	server.startWeb(operaListen)
+
+	return server
+
 }
 
 type ReportStat struct {
@@ -105,58 +107,111 @@ type MRelayReponse struct {
 
 var reportStatObj *ReportStat
 
-func (s *Server) responseResult(w http.ResponseWriter, errorId int, errorString string) {
+/****gin需要处理的固定信息****/
 
-	//返回结构
-	var response ResponseResult
-	response.Result = errorId
-	response.Message = errorString
-	jsonData, _ := json.Marshal(response)
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonData)
+//解决跨域问题
+func Cors() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		method := c.Request.Method
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Headers", "Content-Type,AccessToken,X-CSRF-Token, Authorization, Token")
+		c.Header("Access-Control-Allow-Methods", "PUT, DELETE, POST, GET, OPTIONS")
+		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
+		c.Header("Access-Control-Allow-Credentials", "true")
+
+		//放行所有OPTIONS方法
+		if method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
+		}
+		// 处理请求
+		c.Next()
+	}
+}
+
+func logerMiddleware() gin.HandlerFunc {
+	// 日志文件
+	fileName := path.Join(logFilePath, logFileName)
+
+	// 写入文件
+	src, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		fmt.Println("err", err)
+	}
+
+	// 实例化
+	logger := logrus.New()
+	//设置日志级别
+	logger.SetLevel(logrus.DebugLevel)
+	//设置输出
+	logger.Out = src
+	// 设置 rotatelogs
+	logWriter, err := rotatelogs.New(
+		// 分割后的文件名称
+		fileName+".%Y%m%d.log",
+
+		// 生成软链，指向最新日志文件
+		rotatelogs.WithLinkName(fileName),
+
+		// 设置最大保存时间(7天)
+		rotatelogs.WithMaxAge(7*24*time.Hour),
+
+		// 设置日志切割时间间隔(1天)
+		rotatelogs.WithRotationTime(24*time.Hour),
+	)
+
+	writeMap := lfshook.WriterMap{
+		logrus.InfoLevel:  logWriter,
+		logrus.FatalLevel: logWriter,
+		logrus.DebugLevel: logWriter,
+		logrus.WarnLevel:  logWriter,
+		logrus.ErrorLevel: logWriter,
+		logrus.PanicLevel: logWriter,
+	}
+
+	logger.AddHook(lfshook.NewHook(writeMap, &logrus.JSONFormatter{
+		TimestampFormat: "2006-01-02 15:04:05.000",
+	}))
+
+	return func(c *gin.Context) {
+		//开始时间
+		startTime := time.Now()
+		//处理请求
+		c.Next()
+		//结束时间
+		endTime := time.Now()
+		// 执行时间
+		latencyTime := endTime.Sub(startTime)
+		//请求方式
+		reqMethod := c.Request.Method
+		//请求路由
+		reqUrl := c.Request.RequestURI
+		//状态码
+		statusCode := c.Writer.Status()
+		//请求ip
+		clientIP := c.ClientIP()
+
+		// 日志格式
+		logger.WithFields(logrus.Fields{
+			"status_code":  statusCode,
+			"latency_time": latencyTime,
+			"client_ip":    clientIP,
+			"req_method":   reqMethod,
+			"req_uri":      reqUrl,
+		}).Info()
+
+	}
 }
 
 //启动web接口
-func (s *Server) startWeb() {
+func (s *Server) startWeb(operaListen string) {
 
-	//分组处理
-	channelsGroup := s.webGin.Group("/channellist")
-	{
-		channelsGroup.GET("/:channelName/:dirName", s.handleGetPush)
-		channelsGroup.GET("/:channelName/:dirName/:fileName", s.handleGetReplay)
-		channelsGroup.GET("/:channelName/:dirName/:fileName", s.handleStopProject)
-		channelsGroup.GET("/:channelName/:dirName/:fileName", s.handleGetCurrentList)
-		channelsGroup.GET("/:channelName/:dirName/:fileName", s.handleSetAudioFromPushId)
-	}
-	s.webGin.Run(s.listenString)
-}
-
-func (s *Server) Serve(l net.Listener) error {
-
-	mux := http.NewServeMux()
-
-	//得到推流点
-	// mux.HandleFunc("/getPush", func(w http.ResponseWriter, r *http.Request) { s.handleGetPush(w, r) })
-	//得到指定的回看地址信息
-	// mux.HandleFunc("/getReplay", func(w http.ResponseWriter, r *http.Request) { s.handleGetReplay(w, r) })
-	//项目结束
-	// mux.HandleFunc("/stopProject", func(w http.ResponseWriter, r *http.Request) { s.handleStopProject(w, r) })
-	//获得列表信息
-	// mux.HandleFunc("/getCurrentList", func(w http.ResponseWriter, r *http.Request) { s.handleGetCurrentList(w, r) })
-	//控制声音
-	// mux.HandleFunc("/setPushIdAudio", func(w http.ResponseWriter, r *http.Request) { s.handleSetAudioFromPushId(w, r) })
-
-	reportStatObj = NewReportStat(configure.GetReportList(), s)
-	err := reportStatObj.Start()
-	if err != nil {
-		log.Error("ReportStat start error:", err)
-		return err
-	}
-	defer reportStatObj.Stop()
-
-	http.Serve(l, mux)
-
-	return nil
+	//路由
+	s.webGin.GET("getPush", s.handleGetPush)
+	s.webGin.GET("getReplay", s.handleGetReplay)
+	s.webGin.GET("stopProject", s.handleStopProject)
+	s.webGin.GET("getCurrentList", s.handleGetCurrentList)
+	s.webGin.GET("setPushIdAudio", s.handleSetAudioFromPushId)
+	s.webGin.Run(operaListen)
 }
 
 type Stream struct {
