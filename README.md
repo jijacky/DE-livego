@@ -36,18 +36,18 @@ livego的rtmp配置是基于json格式，简单好用。
 ## rtmp配置示例
 ```python
 {
-"listen": 1935,					    //rtmp监听端口
-"notifyurl":""，				    //暂时不配置
-"hls": "enable",				    //是否开启 hls
-"hlsport" : 8090,				    // hls的拉流端口
-"httpflv" : "enable",				//是否开启fiv 
-"flvport" : 8011,				    // flv的拉流端口
-"httpoper": "enable",				//是否 可以接受 外界的http请求
-"operport": 8070,				    // 监听外界请求的端口
-"engineEnable":"enable",			//是否启动切片机
-"engine":					        //切片机配置信息
+"listen": 1935,					    		//rtmp监听端口
+"notifyurl":""，				    		//暂时不配置
+"hls": "enable",				    		//是否开启 hls
+"hlsport" : 8090,				    		// hls的拉流端口
+"httpflv" : "enable",						//是否开启fiv 
+"flvport" : 8011,				    		// flv的拉流端口
+"httpoper": "enable",						//是否 可以接受 外界的http请求
+"operport": 8070,				    		// 监听外界请求的端口
+"engineEnable":"enable",					//是否启动切片机
+"engine":					        		//切片机配置信息
 {
-	"ffmpeg": "/opt/segmenter",		//切片机程序所在目录
+	"ffmpeg": "/opt/segmenter",				//切片机程序所在目录
 	"vcodec":"copy",
 	"acodec":"copy",
 	"extra_conf": "/opt/config.conf",	    // 切片机的配置文件
@@ -96,3 +96,9 @@ http://***:***/getCurrentList?&projectId=23
 http://***:***/setPushIdAudio?&projectId=13&pushId=1&audio=0
 
 ```
+
+新增功能：
+> * 对于视频流进行ts文件保存。
+> * 根据设置将两个视频流进行画中画功能叠加。
+> * 根据接口停止指定视频流的音频输出。
+
